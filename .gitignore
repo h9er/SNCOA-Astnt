@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Streamlit
+.streamlit/cache/
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local environment
+.env
+.env.local
+
+# Keep these directories (data files are needed!)
+!source_docs/
+!chroma_db_hybrid/

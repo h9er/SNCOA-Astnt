@@ -1,0 +1,15 @@
+MODULE_FILE_MAP = {
+    "Pre-Req": ["Pre-Req_combined.pdf"],
+    "Module 0": ["Module 0_Combined.pdf"],
+    "Module 1": ["Module 1_combined.pdf"],
+    "Module 2": ["Module 2_combined-pages-1-pages-1.pdf",
+                 "Module 2_combined-pages-1-pages-2.pdf",
+                 "Module 2_combined-pages-1-pages-3.pdf",
+                 "Module 2_combined-pages-1-pages-4.pdf",
+                 "Module 2_combined-pages-2.pdf",
+                 "Module 2_combined-pages-3.pdf",
+                 "Module 2_combined-pages-4.pdf",
+                ],
+    "Module 3": ["Module 3_combined.pdf"],
+    "Module 4": ["Module4_Primer Strategic Focus Lab 01 Aug 2024.pdf"]
+}

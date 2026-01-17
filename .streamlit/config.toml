@@ -1,0 +1,25 @@
+[theme]
+primaryColor = "#d90429"
+backgroundColor = "#f0f2f6"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#262730"
+font = "sans serif"
+
+[client]
+showErrorDetails = true
+toolbarMode = "viewer"
+
+[logger]
+level = "info"
+
+[client.toolbarMode]
+# Show minimal toolbar
+
+[server]
+# Increase timeouts for API calls and processing
+maxUploadSize = 200
+enableXsrfProtection = true
+enableCORS = false
+
+[browser]
+gatherUsageStats = false
