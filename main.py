@@ -132,270 +132,55 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 5. ENGINE & DATA LOADING ---
-
-def build_vector_store_from_pdfs():
-    """Build Chroma vector store from scratch using PDFs in source_docs. Supports resuming from checkpoints."""
-    try:
-        if not os.path.exists(SOURCE_DIRECTORY):
-            st.error(f"❌ source_docs directory not found at: {SOURCE_DIRECTORY}")
-            return None
-        
-        st.info("🔨 Building vector store from PDFs (optimized for Streamlit timeout, ~18-22 minutes)...")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # Get all PDF files
-        pdf_files = sorted([f for f in os.listdir(SOURCE_DIRECTORY) if f.endswith('.pdf')])
-        if not pdf_files:
-            st.error(f"❌ No PDF files found in {SOURCE_DIRECTORY}")
-            return None
-        
-        status_text.write(f"📚 Found {len(pdf_files)} PDF files. Loading and processing...")
-        
-        # Load all documents - skip files that can't be parsed
-        all_docs = []
-        skipped_files = []
-        for idx, pdf_file in enumerate(pdf_files):
-            try:
-                full_path = os.path.join(SOURCE_DIRECTORY, pdf_file)
-                status_text.write(f"📖 Loading: {pdf_file}...")
-                
-                loader = PyPDFLoader(full_path)
-                pages = loader.load()
-                
-                if not pages:
-                    st.warning(f"⚠️ {pdf_file} is empty or unreadable - skipping")
-                    skipped_files.append(pdf_file)
-                    continue
-                    
-                all_docs.extend(pages)
-                progress = (idx + 1) / len(pdf_files) * 0.1  # First 10% for loading
-                progress_bar.progress(progress)
-                st.success(f"✅ Loaded {pdf_file} ({len(pages)} pages)")
-                
-            except Exception as e:
-                error_msg = str(e)[:150]
-                st.error(f"❌ FAILED: {pdf_file} - {error_msg}")
-                skipped_files.append(pdf_file)
-                continue  # Skip this file and continue with others
-        
-        if not all_docs:
-            st.error("❌ No documents could be loaded from any PDF files")
-            return None
-        
-        if skipped_files:
-            st.warning(f"⚠️ Skipped {len(skipped_files)} problematic files: {', '.join(skipped_files)}")
-        
-        status_text.write(f"✂️ Splitting {len(all_docs)} pages into chunks...")
-        
-        # Split documents into chunks
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            separators=["\n\n", "\n", " ", ""]
-        )
-        chunks = text_splitter.split_documents(all_docs)
-        progress_bar.progress(0.15)
-        
-        if not chunks:
-            st.error("❌ No chunks were created from documents")
-            return None
-        
-        # Create embeddings using Google (cloud-compatible)
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        
-        # Batch size and delay optimized for Streamlit's ~30min timeout
-        # 20 chunks × 1.5s delay = ~30 requests per 1.5s = 1200 requests/min (well under 3000 RPM)
-        # 696 batches × 1.5s = ~1044 seconds = ~17.4 minutes (safe for 25min timeout)
-        batch_size = 20
-        batches = [chunks[i:i + batch_size] for i in range(0, len(chunks), batch_size)]
-        
-        status_text.write(f"🧠 Creating embeddings for {len(chunks)} chunks ({len(batches)} batches)...")
-        
-        checkpoint_file = os.path.join(CHROMA_PATH, ".embedding_checkpoint.txt")
-        start_batch = 0
-        vectorstore = None
-        
-        # Ensure checkpoint directory exists
-        os.makedirs(CHROMA_PATH, exist_ok=True)
-        
-        # Check for resuming from checkpoint
-        if os.path.exists(checkpoint_file):
-            try:
-                with open(checkpoint_file, "r") as f:
-                    start_batch = int(f.read().strip())
-                if start_batch > 0 and start_batch < len(batches):
-                    st.warning(f"📝 Resuming from batch {start_batch + 1}/{len(batches)}...")
-                    try:
-                        # Try to load existing vectorstore
-                        vectorstore = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
-                        collection = vectorstore._collection
-                        doc_count = collection.count()
-                        if doc_count > 0:
-                            st.info(f"✅ Loaded existing database with {doc_count} documents")
-                    except:
-                        vectorstore = None
-            except:
-                start_batch = 0
-        
-        docs_added_total = 0
-        
-        for batch_idx, batch in enumerate(batches):
-            # Skip if we're resuming
-            if batch_idx < start_batch:
-                continue
-            
-            try:
-                max_retries = 5
-                retry_delay = 2
-                
-                for attempt in range(max_retries):
-                    try:
-                        # Embed this batch
-                        status_text.write(f"📤 Embedding batch {batch_idx + 1}/{len(batches)} ({len(batch)} chunks) [Attempt {attempt + 1}/{max_retries}]...")
-                        
-                        # Use embed_documents to embed the batch
-                        embedded = embeddings.embed_documents([doc.page_content for doc in batch])
-                        
-                        # For the first batch, create the vectorstore. For subsequent batches, add to existing.
-                        if vectorstore is None:
-                            # First batch - initialize the database
-                            vectorstore = Chroma.from_documents(
-                                documents=batch,
-                                embedding=embeddings,
-                                persist_directory=CHROMA_PATH
-                            )
-                            st.success(f"✅ Initialized vector store with batch {batch_idx + 1}")
-                        else:
-                            # Subsequent batches - add to existing
-                            vectorstore.add_documents(batch)
-                        
-                        docs_added_total += len(batch)
-                        
-                        # Update progress
-                        progress = 0.15 + (batch_idx + 1) / len(batches) * 0.6
-                        progress_bar.progress(progress)
-                        
-                        # Save checkpoint every 50 batches to allow resuming
-                        if batch_idx % 50 == 0:
-                            with open(checkpoint_file, "w") as f:
-                                f.write(str(batch_idx))
-                            #vectorstore.persist()  # Persist after each checkpoint
-                            st.info(f"✅ Checkpoint saved at batch {batch_idx + 1}")
-                        
-                        # OPTIMIZED rate limiting: 1.5 seconds between batches (faster than before)
-                        # This stays well under 3000 RPM (1200 requests/min) and fits in Streamlit timeout
-                        if batch_idx < len(batches) - 1:
-                            time.sleep(1.5)
-                        
-                        break  # Success, exit retry loop
-                        
-                    except Exception as batch_error:
-                        error_str = str(batch_error).lower()
-                        if "429" in str(batch_error) or "quota" in error_str or "rate" in error_str or "249" in str(batch_error):
-                            # Rate limit error - wait and retry
-                            retry_delay = min(retry_delay * 2, 60)
-                            st.warning(f"⚠️ Rate limited. Waiting {retry_delay}s...")
-                            time.sleep(retry_delay)
-                            if attempt == max_retries - 1:
-                                raise
-                        else:
-                            raise
-                            
-            except Exception as e:
-                st.error(f"❌ Failed on batch {batch_idx + 1}: {str(e)[:200]}")
-                st.info("💡 **Auto-Resume Enabled:** If Streamlit times out, just refresh the page and it will continue from where it left off.")
-                # Persist what we have so far before returning
-                #vectorstore.persist()
-                return None
-        
-        if docs_added_total == 0:
-            st.error("❌ No documents were successfully embedded")
-            return None
-        
-        progress_bar.progress(0.80)
-        status_text.write(f"💾 Finalizing {docs_added_total} documents in vector store...")
-        
-        # Final persist
-        #vectorstore.persist()
-        
-        # Clean up checkpoint file
-        if os.path.exists(checkpoint_file):
-            os.remove(checkpoint_file)
-        
-        progress_bar.progress(1.0)
-        
-        st.success(f"✅ Vector store built successfully! ({docs_added_total} chunks from {len(all_docs)} pages, {len(skipped_files)} files skipped)")
-        status_text.empty()
-        progress_bar.empty()
-        
-        return vectorstore
-    except Exception as e:
-        st.error(f"❌ Failed to build vector store: {str(e)[:300]}")
-        st.info("""
-        **Troubleshooting:**
-        
-        1. **Streamlit Timeout:** If the build gets interrupted, just refresh the page
-           - Auto-checkpoint system will resume from where it left off
-           - Expected total time: 18-22 minutes (fits within Streamlit timeout)
-        
-        2. **Error 249 / Quota Exceeded:** Your Google API quota may be exhausted
-           - Check: https://console.cloud.google.com/apis/api/generativelanguage.googleapis.com/quotas
-           - **Quota resets daily (24-hour cycle)**
-           - Or upgrade your plan at: https://ai.google.dev
-        
-        3. **Problematic Files:** Some PDFs may be corrupted or unreadable
-           - The app now skips files and continues with others
-           - Check error messages to see which files failed
-        """)
-        import traceback
-        with st.expander("Error Details"):
-            st.code(traceback.format_exc())
-        return None
-
 @st.cache_resource
 def load_vector_store():
-    """Load Chroma vector store with cloud-compatible embeddings. Auto-rebuild if missing."""
-    try:
-        # Check if vector store already exists
-        if os.path.exists(CHROMA_PATH):
-            try:
-                # Try Google's embeddings for Cloud
-                try:
-                    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-                except Exception:
-                    # Fallback to Ollama (for local development)
-                    from langchain_ollama import OllamaEmbeddings
-                    embeddings = OllamaEmbeddings(model="nomic-embed-text")
-                # Load Chroma database
-                vectorstore = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
-                retriever = vectorstore.as_retriever()  #create the retriever
-                # Verify it has data
-                collection = vectorstore._collection
-                doc_count = collection.count()
-                if doc_count == 0:
-                    st.warning("⚠️ Vector store is empty. Rebuilding...")
-                    return build_vector_store_from_pdfs()
-                
-                st.success(f"✅ Vector store loaded ({doc_count} documents)")
-                return vectorstore
-            except Exception as e:
-                st.warning(f"⚠️ Could not load existing vector store: {str(e)}")
-                st.info("Rebuilding from source documents...")
-                return build_vector_store_from_pdfs()
-        else:
-            # Vector store doesn't exist - build it
-            if source_docs_exists:
-                st.info("📦 Vector store not found. Building from source documents...")
-                return build_vector_store_from_pdfs()
-            else:
-                st.error("❌ Both vector store and source_docs are missing!")
-                return None
-                
-    except Exception as e:
-        st.error(f"❌ Vector store loading failed: {str(e)}")
+    """Load Chroma vector store. Assumes database exists in repo."""
+    
+    # 1. Check if the folder exists on the server
+    if not os.path.exists(CHROMA_PATH):
+        st.error(f"❌ Error: 'chroma_db_hybrid' folder not found. Please ensure it is pushed to GitHub.")
         return None
 
+    try:
+        # 2. Force Google Embeddings
+        # We must use the exact same model that built the database
+        if "GOOGLE_API_KEY" not in os.environ:
+             st.error("❌ GOOGLE_API_KEY missing. Cannot load vector store.")
+             return None
+        
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        
+        # 3. Connect using the Explicit Persistent Client
+        # This is more robust for Cloud environments
+        import chromadb
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
+        
+        # 4. Load the Specific Collection
+        # We must ask for "sncoa_instructor_collection" because that is what the builder script used.
+        vectorstore = Chroma(
+            client=client,
+            collection_name="sncoa_instructor_collection",
+            embedding_function=embeddings,
+        )
+        
+        # 5. Verify Data
+        # We access the internal collection to count the items
+        count = vectorstore._collection.count()
+        
+        if count == 0:
+            st.warning("⚠️ Database loaded, but it appears empty. Did the builder script save correctly?")
+            # We do NOT trigger a rebuild here automatically. We want to see this warning.
+            return None
+        
+        st.success(f"✅ Loaded {count} documents from pre-built database.")
+        return vectorstore
+
+    except Exception as e:
+        st.error(f"❌ Critical Error loading database: {str(e)}")
+        # We do NOT trigger a rebuild here. We need to see the error.
+        return None
+    
+    # Initialize the global variable
 vectorstore = load_vector_store()
 
 @st.cache_data(show_spinner=False)
@@ -660,11 +445,11 @@ with st.sidebar:
             ```
             """)
         elif not vectorstore and source_docs_exists:
-            st.info("""
-            **⏳ Vector Store Building**
+            st.warning("""
+            **⚠️ Vector Store Missing**
             
-            The app is building the vector store from source_docs.
-            This happens automatically on first load (2-3 minutes).
+            The app found source_docs but could not load the Database.
+            Please check that 'chroma_db_hybrid' is on GitHub.
             """)
         elif vectorstore:
             st.success("""
