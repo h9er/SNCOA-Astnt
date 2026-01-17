@@ -1,38 +1,22 @@
-# --- The Interface ---
-streamlit>=1.41.0
+streamlit
+# Core LangChain - letting pip resolve the latest versions is safer here
+langchain
+langchain-community
+langchain-core
+langchain-text-splitters
 
-# --- The Brains (LangChain Ecosystem) ---
-# LangChain recently updated to v0.3 (Oct 2025), which changed many imports.
-# These versions ensure you are on the "new stable" architecture.
-langchain>=0.3.14
-langchain-classic>=1.0.1
-langchain-community>=0.3.14
-langchain-core>=0.3.29
-
-# --- The Model Integrations ---
-# Google Gemini (Cloud)
-langchain-google-genai>=2.0.8
-
-# Ollama (Local/Secure)
-# This specific version fixes a known "Pydantic" validation crash.
-langchain-ollama>=0.2.2
-
-# --- The Memory (Vector Database) ---
-# ChromaDB is sensitive. We pin 'langchain-chroma' which manages the underlying database.
-langchain-chroma>=0.2.0
+# Integrations
+langchain-google-genai
+langchain-ollama
+langchain-chroma
 chromadb
-langchain-text-splitters>=0.3.8
 
-# --- Document Processing ---
-pypdf>=5.0.1 
+# Utilities & Processing
+pypdf
+pymupdf
+python-dotenv
+tiktoken
+cryptography
 
-# --- Environment Management ---
-python-dotenv>=1.0.1
-
-# --- CRITICAL FIX FOR CLOUD HOSTING ---
-# Streamlit Cloud (Linux) often has an old version of SQLite that breaks Chroma.
-# This library forces it to use a newer version.
-# pysqlite3-binary==0.5.4
-cryptography # Ensures secure connections for cloud-hosted environments
-pymupdf 
-pysqlite3-binary 
+# Critical for Streamlit Cloud + Chroma
+pysqlite3-binary
