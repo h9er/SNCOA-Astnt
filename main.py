@@ -263,7 +263,7 @@ MODULE_FILE_MAP = {
 }
 CLOUD_MODELS = [
     "gemini-2.5-pro", #RPM-150/TPM-2M/RPD-10K
-    "gemini-2.5-flash-lite", #RPM-4K/TPM-4M/RPD-Unlimited
+    #"gemini-2.5-flash-lite", #RPM-4K/TPM-4M/RPD-Unlimited
     "gemini-2.5-flash", #RPM-1K/TPM-1M/RPD-10K
     "gemini-2.0-flash", #RPM-4K/TPM-4M/RPD-Unlimited
     "gemini-flash-latest", #currently is gemini-2.5-flash 
@@ -276,7 +276,7 @@ def get_llm_instance(engine_choice, model_name=None):
     """Create LLM instance with proper error handling."""
     try:
         if "Gemini" in engine_choice:
-            target_model = model_name if model_name else "gemini-2.0-flash"
+            target_model = model_name if model_name else "gemini-2.5-pro"
             
             # Verify API key exists
             if "GOOGLE_API_KEY" not in os.environ:
@@ -295,9 +295,9 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     debug_log = [] 
     full_context_text = ""
     
-    # SAFETY LIMIT: 3,950,000 tokens (Leaves 50k buffer for the AI's response)
-    # Gemini 2.0-Flash has a hard limit of 4,000,000 input tokens.
-    MAX_SAFE_TOKENS = 3950000
+    # SAFETY LIMIT: 31,950,000 tokens (Leaves 50k buffer for the AI's response)
+    # Gemini 2.5 Pro has a hard limit of 2,000,000 input tokens.
+    MAX_SAFE_TOKENS = 1950000
     
     def estimate_tokens(text):
         return len(text) / 4
@@ -380,15 +380,15 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     total_tokens = int(estimate_tokens(full_context_text))
     debug_log.append(f"📊 Final Payload: {total_tokens:,} tokens")
     
-    if total_tokens > 4000000:
-        st.error(f"❌ CRITICAL: Payload ({total_tokens:,}) exceeds Google's 4M limit. You must deselect some modules.")
+    if total_tokens > 2000000:
+        st.error(f"❌ CRITICAL: Payload ({total_tokens:,}) exceeds Google's 2M limit. You must deselect some modules.")
         return None, debug_log
 
     # --- 6. EXECUTION LOOP ---
-    # We specifically use gemini-2.0-flash which is most stable for high tokens
+    # We specifically use gemini-2.5-proflash which is most stable for high tokens
     if "Gemini" in engine_choice:
-        # Override the list to force 2.0-flash first, it handles large context best
-        models_to_try = ["gemini-2.0-flash", "gemini-2.5-flash-lite"] 
+        # Override the list to force 2.5-pro first, it handles large context best
+        models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"] 
     else:
         models_to_try = ["llama3.1"]
 
