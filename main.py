@@ -957,7 +957,7 @@ with col_main:
                     "## 3. RUBRIC SCORING GRID\n"
                     "| Rubric Criteria | Student Performance | Points/Grade |\n"
                     "|---|---|---|\n"
-                    "| (Criteria Name) | (Specific feedback) | (Score) |\n\n"
+                    "| (Criteria Name) | (Specific feedback, justification for any deductions) | (Score) |\n\n"
 
                     "## 4. FINAL SCORE\n"
                     "**CALCULATED SCORE:** (Sum of points) / (Total Possible)\n"
