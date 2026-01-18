@@ -388,7 +388,7 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     # We specifically use gemini-1.5-flash which is most stable for high tokens
     if "Gemini" in engine_choice:
         # Override the list to force 1.5-flash first, it handles large context best
-        models_to_try = ["gemini-1.5-flash", "gemini-flash-latest"] 
+        models_to_try = ["gemini-2.0-flash", "gemini-2.5-flash-lite"] 
     else:
         models_to_try = ["llama3.1"]
 
