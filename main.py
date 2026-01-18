@@ -262,12 +262,12 @@ MODULE_FILE_MAP = {
     "Module 4": ["Module4_Primer Strategic Focus Lab 01 Aug 2024.pdf"]
 }
 CLOUD_MODELS = [
-    "gemini-2.5-pro", 
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-flash-latest", 
-    "gemini-pro"
+    "gemini-2.5-pro", #RPM-150/TPM-2M/RPD-10K
+    "gemini-2.5-flash-lite", #RPM-4K/TPM-4M/RPD-Unlimited
+    "gemini-2.5-flash", #RPM-1K/TPM-1M/RPD-10K
+    "gemini-2.0-flash", #RPM-4K/TPM-4M/RPD-Unlimited
+    "gemini-flash-latest", #currently is gemini-2.5-flash 
+    "gemini-3.0-pro" #RPM-25/TPM-1M/RPD-250
 ]
 
 # --- 7. LOGIC FUNCTIONS ---
