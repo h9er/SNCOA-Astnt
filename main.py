@@ -294,6 +294,143 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     debug_log = [] 
     full_context_text = ""
     
+    # SAFETY LIMIT: 950,000 tokens (Leaves 50k buffer for the AI's response)
+    # Gemini Flash has a hard limit of 1,000,000 input tokens.
+    MAX_SAFE_TOKENS = 950000
+    
+    def estimate_tokens(text):
+        return len(text) / 4
+
+    # --- 1. LOAD MANDATORY: RUBRIC (Never Skip) ---
+    try:
+        rubric_text = read_pdf_directly(rubric_filename)
+        if "[ERROR" in rubric_text:
+            debug_log.append(f"❌ Rubric Error: {rubric_text}")
+        else:
+            full_context_text += f"\n--- SOURCE: {rubric_filename} (RUBRIC) ---\n{rubric_text}\n"
+            debug_log.append(f"✅ Loaded Rubric")
+    except Exception as e:
+        debug_log.append(f"❌ Error loading Rubric: {str(e)}")
+
+    # --- 2. LOAD USER CONTENT: MODULES (Priority High) ---
+    # We load this BEFORE T&Q because grading the specific module is the main mission.
+    if content_scope:
+        debug_log.append(f"📋 Loading {len(content_scope)} selected modules...")
+        for module in content_scope:
+            try:
+                target_file = MODULE_FILE_MAP.get(module, module)
+                text = read_pdf_directly(target_file)
+                
+                if "[ERROR" in text:
+                    debug_log.append(f"❌ {module} Error: {text}")
+                else:
+                    file_header = f"{module} ({len(target_file)} parts)" if isinstance(target_file, list) else module
+                    full_context_text += f"\n--- SOURCE: {file_header} (CONTENT) ---\n{text}\n"
+                    debug_log.append(f"✅ Loaded {module}")
+            except Exception as e:
+                debug_log.append(f"❌ Error loading {module}: {str(e)}")
+    else:
+        debug_log.append(f"⚠️ No content modules selected")
+
+    # --- 3. LOAD REFERENCE: STYLE GUIDE (Priority Medium) ---
+    # This is small (~20k tokens), so we usually keep it.
+    try:
+        style_guide = "AFSNCOA Style Guide August 2025.pdf"
+        text = read_pdf_directly(style_guide)
+        if "[ERROR" not in text:
+            full_context_text += f"\n--- SOURCE: {style_guide} (STYLE) ---\n{text}\n"
+            debug_log.append(f"✅ Loaded Style Guide")
+    except Exception as e:
+        debug_log.append(f"❌ Style Guide Error: {str(e)}")
+
+    # --- 4. CONDITIONAL LOAD: TONGUE & QUILL (The Heavyweight) ---
+    # We check size BEFORE adding this.
+    tnq_file = "DAFH33-337 Tongue and Quill Dec 22.pdf"
+    tnq_loaded = False
+    
+    if "Gemini" in engine_choice:
+        try:
+            current_size = estimate_tokens(full_context_text)
+            tnq_text = read_pdf_directly(tnq_file)
+            tnq_size = estimate_tokens(tnq_text)
+            
+            # THE CRITICAL CHECK
+            if (current_size + tnq_size) < MAX_SAFE_TOKENS:
+                full_context_text += f"\n--- SOURCE: {tnq_file} (STYLE) ---\n{tnq_text}\n"
+                debug_log.append(f"✅ Loaded Tongue & Quill (Space Available)")
+                tnq_loaded = True
+            else:
+                # EJECT PROTOCOL
+                debug_log.append(f"⚠️ EJECTED Tongue & Quill to prevent crash.")
+                debug_log.append(f"📉 Size w/o T&Q: {int(current_size):,} tokens. T&Q was {int(tnq_size):,} tokens.")
+                
+                # Add a system instruction instead of the file
+                full_context_text += (
+                    "\n--- SYSTEM NOTE ---\n"
+                    "The text of AFH 33-337 (Tongue and Quill) was omitted to preserve bandwidth. "
+                    "However, YOU ARE STILL REQUIRED to grade grammar and formatting based on "
+                    "standard AFH 33-337 rules found in your training data.\n"
+                )
+                st.toast("T&Q Text Ejected (Payload Too Large) - Using AI Knowledge instead.", icon="📉")
+        except Exception as e:
+            debug_log.append(f"❌ T&Q Check Failed: {str(e)}")
+
+    # --- 5. FINAL SIZE CHECK & WARNING ---
+    total_tokens = int(estimate_tokens(full_context_text))
+    debug_log.append(f"📊 Final Payload: {total_tokens:,} tokens")
+    
+    if total_tokens > 1000000:
+        st.error(f"❌ CRITICAL: Payload ({total_tokens:,}) exceeds Google's 1M limit. You must deselect some modules.")
+        return None, debug_log
+
+    # --- 6. EXECUTION LOOP ---
+    # We specifically use gemini-1.5-flash which is most stable for high tokens
+    if "Gemini" in engine_choice:
+        # Override the list to force 1.5-flash first, it handles large context best
+        models_to_try = ["gemini-1.5-flash", "gemini-flash-latest"] 
+    else:
+        models_to_try = ["llama3.1"]
+
+    last_error = None
+    
+    for i, model_name in enumerate(models_to_try):
+        try:
+            debug_log.append(f"🔄 Attempt {i+1}: Grading with {model_name}...")
+            
+            llm = get_llm_instance(engine_choice, model_name)
+            chain = prompt_template | llm | StrOutputParser()
+            stream = chain.stream({"context": full_context_text, "input": student_essay})
+            
+            debug_log.append(f"✅ Success! Connected to {model_name}")
+            return stream, debug_log
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            debug_log.append(f"❌ {model_name} failed: {str(e)[:100]}...")
+            last_error = e
+            
+            # RATE LIMIT HANDLING
+            if "retry in" in error_msg:
+                try:
+                    import re
+                    match = re.search(r"retry in (\d+(\.\d+)?)", error_msg)
+                    if match:
+                        wait_seconds = float(match.group(1)) + 5
+                        debug_log.append(f"⏳ Quota Limit Hit. Waiting {wait_seconds:.1f}s...")
+                        time.sleep(wait_seconds)
+                        continue 
+                except:
+                    pass
+            
+            if "429" in error_msg or "quota" in error_msg:
+                debug_log.append(f"⏳ Generic Rate Limit. Sleeping 30s...")
+                time.sleep(30)
+                continue
+            
+    raise last_error if last_error else Exception("All models failed silently.")
+    debug_log = [] 
+    full_context_text = ""
+    
     # 1. Helper to count tokens roughly (1 token approx 4 chars)
     def estimate_tokens(text):
         return len(text) / 4
