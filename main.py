@@ -295,9 +295,9 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     debug_log = [] 
     full_context_text = ""
     
-    # SAFETY LIMIT: 950,000 tokens (Leaves 50k buffer for the AI's response)
-    # Gemini Flash has a hard limit of 1,000,000 input tokens.
-    MAX_SAFE_TOKENS = 950000
+    # SAFETY LIMIT: 3,950,000 tokens (Leaves 50k buffer for the AI's response)
+    # Gemini 2.0-Flash has a hard limit of 4,000,000 input tokens.
+    MAX_SAFE_TOKENS = 3950000
     
     def estimate_tokens(text):
         return len(text) / 4
@@ -380,14 +380,14 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     total_tokens = int(estimate_tokens(full_context_text))
     debug_log.append(f"📊 Final Payload: {total_tokens:,} tokens")
     
-    if total_tokens > 1000000:
-        st.error(f"❌ CRITICAL: Payload ({total_tokens:,}) exceeds Google's 1M limit. You must deselect some modules.")
+    if total_tokens > 4000000:
+        st.error(f"❌ CRITICAL: Payload ({total_tokens:,}) exceeds Google's 4M limit. You must deselect some modules.")
         return None, debug_log
 
     # --- 6. EXECUTION LOOP ---
-    # We specifically use gemini-1.5-flash which is most stable for high tokens
+    # We specifically use gemini-2.0-flash which is most stable for high tokens
     if "Gemini" in engine_choice:
-        # Override the list to force 1.5-flash first, it handles large context best
+        # Override the list to force 2.0-flash first, it handles large context best
         models_to_try = ["gemini-2.0-flash", "gemini-2.5-flash-lite"] 
     else:
         models_to_try = ["llama3.1"]
@@ -561,12 +561,7 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
 if "messages" not in st.session_state: st.session_state.messages = []
 if "rubric_query" not in st.session_state: st.session_state.rubric_query = ""
 if "last_evidence" not in st.session_state: st.session_state.last_evidence = []
-#content_scope = st.multiselect("Include Content:", options=list(MODULE_FILE_MAP.keys()))
 
-# --- Add this check ---
-#if "Module 2" in content_scope:
-#     st.caption("ℹ️ **Note:** Module 2 + T&Q is a large dataset. Grading may pause for a couple minutes depending on the process.")
-# ----------------------
 # --- 9. SIDEBAR ---
 with st.sidebar:
     st.header("Control Panel")
@@ -910,7 +905,7 @@ with col_main:
                 st.warning("Please select a Rubric and paste the Essay.")
             else:
                 result_container = st.container()
-                result_container.info("⏳ Analyzing... (This uses Google's Brain, please wait 10s)")
+                result_container.info("⏳ Analyzing... (This uses Google's Brain, please wait 10+s)")
                 
                 # GRADING TEMPLATE
                 system_prompt = (
