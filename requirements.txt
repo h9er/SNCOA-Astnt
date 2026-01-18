@@ -1,22 +1,23 @@
 streamlit
-# Core LangChain - letting pip resolve the latest versions is safer here
-langchain
-langchain-community
-langchain-core
-langchain-text-splitters
+# --- PINNED VERSIONS (CRITICAL) ---
+# We align these three to ensure the 'chains' module is found
+langchain==0.3.0
+langchain-community==0.3.0
+langchain-core==0.3.0
+langchain-text-splitters==0.3.0
 
-# Integrations
+# --- INTEGRATIONS ---
 langchain-google-genai
 langchain-ollama
 langchain-chroma
 chromadb
 
-# Utilities & Processing
+# --- UTILITIES ---
 pypdf
 pymupdf
 python-dotenv
 tiktoken
 cryptography
 
-# Critical for Streamlit Cloud + Chroma
+# --- CLOUD FIXES ---
 pysqlite3-binary
