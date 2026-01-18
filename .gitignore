@@ -19,6 +19,7 @@ build/
 # Streamlit
 .streamlit/cache/
 .streamlit/secrets.toml
+.streamlit/ 
 
 # OS
 .DS_Store

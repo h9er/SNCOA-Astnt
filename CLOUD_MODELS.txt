@@ -1,7 +1,0 @@
-CLOUD_MODELS = [
-    "gemini-flash-latest",
-    "gemini-2.5-flash-lite",
-    "gemini-3-flash",
-    "gemma-3-27b-it", 
-    "gemini-pro"
-]
