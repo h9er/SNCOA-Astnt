@@ -561,11 +561,11 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
 if "messages" not in st.session_state: st.session_state.messages = []
 if "rubric_query" not in st.session_state: st.session_state.rubric_query = ""
 if "last_evidence" not in st.session_state: st.session_state.last_evidence = []
-content_scope = st.multiselect("Include Content:", options=list(MODULE_FILE_MAP.keys()))
+#content_scope = st.multiselect("Include Content:", options=list(MODULE_FILE_MAP.keys()))
 
 # --- Add this check ---
-if "Module 2" in content_scope:
-     st.caption("ℹ️ **Note:** Module 2 + T&Q is a large dataset. Grading may pause for a couple minutes depending on the process.")
+#if "Module 2" in content_scope:
+#     st.caption("ℹ️ **Note:** Module 2 + T&Q is a large dataset. Grading may pause for a couple minutes depending on the process.")
 # ----------------------
 # --- 9. SIDEBAR ---
 with st.sidebar:
