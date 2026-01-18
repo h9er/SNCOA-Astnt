@@ -318,7 +318,6 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
                 if "[ERROR" in text:
                     debug_log.append(f"❌ {module} Error: {text}")
                 else:
-                    # Handle both single files and lists of files
                     if isinstance(target_file, list):
                         file_str = f"{module} ({len(target_file)} parts)"
                         full_context_text += f"\n--- SOURCE: {file_str} (CONTENT) ---\n{text}\n"
@@ -342,25 +341,22 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     except Exception as e:
         debug_log.append(f"❌ Style Guide skipped: {str(e)}")
 
+    # Load T&Q
     tnq_file = "DAFH33-337 Tongue and Quill Dec 22.pdf"
     if "Gemini" in engine_choice:
         try:
             text = read_pdf_directly(tnq_file)
             if "[ERROR" not in text:
                 full_context_text += f"\n--- SOURCE: {tnq_file} (STYLE) ---\n{text}\n"
-                debug_log.append(f"✅ Loaded Tongue & Quill (Cloud)")
+                debug_log.append(f"✅ Loaded Tongue & Quill")
         except:
             pass
 
-    # --- 4. SAFETY CHECK: ESTIMATE SIZE ---
-    # 1 Token ~= 4 Characters. 
+    # --- 4. ESTIMATE SIZE ---
     estimated_tokens = len(full_context_text) / 4
     debug_log.append(f"📊 Estimated Payload: {int(estimated_tokens):,} tokens")
-    
-    if estimated_tokens > 900000:
-        debug_log.append("⚠️ WARNING: Approaching 1M token limit. This may cause 429 errors.")
 
-    # --- 5. RETRY LOOP WITH BACKOFF ---
+    # --- 5. RETRY LOOP WITH SMART WAIT ---
     if "Gemini" in engine_choice:
         models_to_try = CLOUD_MODELS
     else:
@@ -374,11 +370,8 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
             
             llm = get_llm_instance(engine_choice, model_name)
             chain = prompt_template | llm | StrOutputParser()
-            
-            # STREAMING REQUEST
             stream = chain.stream({"context": full_context_text, "input": student_essay})
             
-            # If we get here, connection was successful
             debug_log.append(f"✅ Success! Connected to {model_name}")
             return stream, debug_log
             
@@ -387,15 +380,31 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
             debug_log.append(f"❌ {model_name} failed: {str(e)[:100]}...")
             last_error = e
             
-            # INTELLIGENT BACKOFF FOR 429 (Too Many Requests)
-            if "429" in error_msg or "resource exhausted" in error_msg:
-                wait_time = 10  # Wait 10 seconds to let the token bucket drain
-                debug_log.append(f"⏳ Hit Rate Limit (429). Cooling down for {wait_time}s...")
-                time.sleep(wait_time)
+            # --- INTELLIGENT BACKOFF ---
+            # If Google explicitly tells us how long to wait, we OBEY it.
+            if "retry in" in error_msg:
+                try:
+                    # Regex to find the number (e.g., "27.701")
+                    import re
+                    match = re.search(r"retry in (\d+(\.\d+)?)", error_msg)
+                    if match:
+                        wait_seconds = float(match.group(1))
+                        # Add 5 second buffer to be safe
+                        total_wait = wait_seconds + 5
+                        debug_log.append(f"⏳ Quota Hit. Google asked to wait {wait_seconds}s. Sleeping {total_wait:.1f}s...")
+                        time.sleep(total_wait)
+                        # After sleeping, we retry the SAME model or continue to next?
+                        # Continuing to next model is safer as it might be a model-specific quota
+                        continue 
+                except:
+                    pass
             
-            continue
+            # Fallback for generic 429 without specific time
+            if "429" in error_msg or "quota" in error_msg:
+                debug_log.append(f"⏳ Generic Rate Limit. Sleeping 30s...")
+                time.sleep(30)
+                continue
             
-    # If we get here, all models failed
     raise last_error if last_error else Exception("All models failed silently.")
 
 # --- 8. UI INITIALIZATION ---
