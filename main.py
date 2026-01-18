@@ -295,7 +295,7 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     full_context_text = ""
     loaded_modules = []
 
-    # Load Rubric
+    # --- 1. LOAD RUBRIC ---
     try:
         rubric_text = read_pdf_directly(rubric_filename)
         if "[ERROR" in rubric_text:
@@ -307,7 +307,7 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     except Exception as e:
         debug_log.append(f"❌ Error loading Rubric: {str(e)}")
 
-    # Load Content
+    # --- 2. LOAD CONTENT (MODULES) ---
     if content_scope:
         debug_log.append(f"📋 Loading {len(content_scope)} selected modules...")
         for module in content_scope:
@@ -315,7 +315,6 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
                 target_file = MODULE_FILE_MAP.get(module, module)
                 text = read_pdf_directly(target_file)
                 
-                # Check for errors in returned text
                 if "[ERROR" in text:
                     debug_log.append(f"❌ {module} Error: {text}")
                 else:
@@ -333,58 +332,67 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
     else:
         debug_log.append(f"⚠️ No content modules selected")
 
-    # Load Style Guides
+    # --- 3. LOAD STYLE GUIDES ---
     try:
         style_guide = "AFSNCOA Style Guide August 2025.pdf"
         text = read_pdf_directly(style_guide)
-        if "[ERROR" in text:
-            debug_log.append(f"❌ Style Guide Error: {text}")
-        else:
+        if "[ERROR" not in text:
             full_context_text += f"\n--- SOURCE: {style_guide} (STYLE) ---\n{text}\n"
             debug_log.append(f"✅ Loaded Style Guide")
-            loaded_modules.append("Style Guide")
     except Exception as e:
-        debug_log.append(f"❌ Error loading Style Guide: {str(e)}")
+        debug_log.append(f"❌ Style Guide skipped: {str(e)}")
 
-    # Load T&Q only for Cloud
     tnq_file = "DAFH33-337 Tongue and Quill Dec 22.pdf"
     if "Gemini" in engine_choice:
         try:
             text = read_pdf_directly(tnq_file)
-            if "[ERROR" in text:
-                debug_log.append(f"❌ T&Q Error: {text}")
-            else:
+            if "[ERROR" not in text:
                 full_context_text += f"\n--- SOURCE: {tnq_file} (STYLE) ---\n{text}\n"
-                debug_log.append(f"✅ Loaded Tongue & Quill (Cloud Only)")
-                loaded_modules.append("Tongue & Quill")
-        except Exception as e:
-            debug_log.append(f"❌ Error loading T&Q: {str(e)}")
-    else:
-        debug_log.append(f"⚠️ Skipped Tongue & Quill (Too large for Local Mode)")
-    
-    # Summary
-    debug_log.append(f"📦 Total modules loaded: {len(loaded_modules)} - {', '.join(loaded_modules)}")
+                debug_log.append(f"✅ Loaded Tongue & Quill (Cloud)")
+        except:
+            pass
 
-    # Retry Loop
+    # --- 4. SAFETY CHECK: ESTIMATE SIZE ---
+    # 1 Token ~= 4 Characters. 
+    estimated_tokens = len(full_context_text) / 4
+    debug_log.append(f"📊 Estimated Payload: {int(estimated_tokens):,} tokens")
+    
+    if estimated_tokens > 900000:
+        debug_log.append("⚠️ WARNING: Approaching 1M token limit. This may cause 429 errors.")
+
+    # --- 5. RETRY LOOP WITH BACKOFF ---
     if "Gemini" in engine_choice:
         models_to_try = CLOUD_MODELS
     else:
         models_to_try = ["llama3.1"]
 
     last_error = None
-    for model_name in models_to_try:
+    
+    for i, model_name in enumerate(models_to_try):
         try:
-            debug_log.append(f"🔄 Attempting grade with: {model_name}...")
-            llm = get_llm_instance(engine_choice, model_name)
-            chain = prompt_template | llm | StrOutputParser() # Use StrOutputParser for simple text
+            debug_log.append(f"🔄 Attempt {i+1}: Grading with {model_name}...")
             
-            # Use stream for better UX
+            llm = get_llm_instance(engine_choice, model_name)
+            chain = prompt_template | llm | StrOutputParser()
+            
+            # STREAMING REQUEST
             stream = chain.stream({"context": full_context_text, "input": student_essay})
-            debug_log.append(f"✅ Success! Streaming from: {model_name}")
+            
+            # If we get here, connection was successful
+            debug_log.append(f"✅ Success! Connected to {model_name}")
             return stream, debug_log
+            
         except Exception as e:
-            debug_log.append(f"❌ {model_name} failed: {str(e)}")
+            error_msg = str(e).lower()
+            debug_log.append(f"❌ {model_name} failed: {str(e)[:100]}...")
             last_error = e
+            
+            # INTELLIGENT BACKOFF FOR 429 (Too Many Requests)
+            if "429" in error_msg or "resource exhausted" in error_msg:
+                wait_time = 10  # Wait 10 seconds to let the token bucket drain
+                debug_log.append(f"⏳ Hit Rate Limit (429). Cooling down for {wait_time}s...")
+                time.sleep(wait_time)
+            
             continue
             
     # If we get here, all models failed
