@@ -293,21 +293,47 @@ def get_llm_instance(engine_choice, model_name=None):
 def grade_with_direct_read(rubric_filename, student_essay, prompt_template, content_scope, engine_choice):
     debug_log = [] 
     full_context_text = ""
-    loaded_modules = []
+    
+    # 1. Helper to count tokens roughly (1 token approx 4 chars)
+    def estimate_tokens(text):
+        return len(text) / 4
 
-    # --- 1. LOAD RUBRIC ---
+    # --- PHASE 1: LOAD MANDATORY REFERENCE MATERIAL ---
+    # These are REQUIRED for every grading operation. We do not skip them.
+    
+    # A. Rubric
     try:
         rubric_text = read_pdf_directly(rubric_filename)
         if "[ERROR" in rubric_text:
             debug_log.append(f"❌ Rubric Error: {rubric_text}")
         else:
             full_context_text += f"\n--- SOURCE: {rubric_filename} (RUBRIC) ---\n{rubric_text}\n"
-            debug_log.append(f"✅ Loaded Rubric: {rubric_filename}")
-            loaded_modules.append(rubric_filename)
+            debug_log.append(f"✅ Loaded Rubric")
     except Exception as e:
         debug_log.append(f"❌ Error loading Rubric: {str(e)}")
 
-    # --- 2. LOAD CONTENT (MODULES) ---
+    # B. Style Guide (Mandatory)
+    try:
+        style_guide = "AFSNCOA Style Guide August 2025.pdf"
+        text = read_pdf_directly(style_guide)
+        if "[ERROR" not in text:
+            full_context_text += f"\n--- SOURCE: {style_guide} (STYLE) ---\n{text}\n"
+            debug_log.append(f"✅ Loaded Style Guide")
+    except Exception as e:
+        debug_log.append(f"❌ Style Guide Error: {str(e)}")
+
+    # C. Tongue and Quill (Mandatory)
+    tnq_file = "DAFH33-337 Tongue and Quill Dec 22.pdf"
+    if "Gemini" in engine_choice:
+        try:
+            text = read_pdf_directly(tnq_file)
+            if "[ERROR" not in text:
+                full_context_text += f"\n--- SOURCE: {tnq_file} (STYLE) ---\n{text}\n"
+                debug_log.append(f"✅ Loaded Tongue & Quill (Mandatory)")
+        except Exception as e:
+            debug_log.append(f"❌ T&Q Error: {str(e)}")
+
+    # --- PHASE 2: LOAD SELECTED CONTENT (Stepping through Module 2) ---
     if content_scope:
         debug_log.append(f"📋 Loading {len(content_scope)} selected modules...")
         for module in content_scope:
@@ -318,45 +344,32 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
                 if "[ERROR" in text:
                     debug_log.append(f"❌ {module} Error: {text}")
                 else:
+                    # Handle both single files and lists (Module 2 stepping)
                     if isinstance(target_file, list):
-                        file_str = f"{module} ({len(target_file)} parts)"
-                        full_context_text += f"\n--- SOURCE: {file_str} (CONTENT) ---\n{text}\n"
+                        # This handles the 7 files of Module 2
+                        file_header = f"{module} ({len(target_file)} parts)"
+                        debug_log.append(f"🔹 Stepping through {len(target_file)} parts of {module}...")
                     else:
-                        full_context_text += f"\n--- SOURCE: {target_file} (CONTENT) ---\n{text}\n"
+                        file_header = module
                     
+                    full_context_text += f"\n--- SOURCE: {file_header} (CONTENT) ---\n{text}\n"
                     debug_log.append(f"✅ Loaded {module}")
-                    loaded_modules.append(module)
             except Exception as e:
                 debug_log.append(f"❌ Error loading {module}: {str(e)}")
     else:
         debug_log.append(f"⚠️ No content modules selected")
 
-    # --- 3. LOAD STYLE GUIDES ---
-    try:
-        style_guide = "AFSNCOA Style Guide August 2025.pdf"
-        text = read_pdf_directly(style_guide)
-        if "[ERROR" not in text:
-            full_context_text += f"\n--- SOURCE: {style_guide} (STYLE) ---\n{text}\n"
-            debug_log.append(f"✅ Loaded Style Guide")
-    except Exception as e:
-        debug_log.append(f"❌ Style Guide skipped: {str(e)}")
+    # --- PHASE 3: SIZE CHECK & USER WARNING ---
+    total_tokens = int(estimate_tokens(full_context_text))
+    debug_log.append(f"📊 Total Payload: {total_tokens:,} tokens")
+    
+    # User requested warning message logic
+    if total_tokens > 200000:
+        warning_msg = f"⚠️ Large Payload ({total_tokens:,} tokens). Grading will take longer due to the size of selected texts."
+        debug_log.append(warning_msg)
+        st.toast(warning_msg, icon="⏳")
 
-    # Load T&Q
-    tnq_file = "DAFH33-337 Tongue and Quill Dec 22.pdf"
-    if "Gemini" in engine_choice:
-        try:
-            text = read_pdf_directly(tnq_file)
-            if "[ERROR" not in text:
-                full_context_text += f"\n--- SOURCE: {tnq_file} (STYLE) ---\n{text}\n"
-                debug_log.append(f"✅ Loaded Tongue & Quill")
-        except:
-            pass
-
-    # --- 4. ESTIMATE SIZE ---
-    estimated_tokens = len(full_context_text) / 4
-    debug_log.append(f"📊 Estimated Payload: {int(estimated_tokens):,} tokens")
-
-    # --- 5. RETRY LOOP WITH SMART WAIT ---
+    # --- PHASE 4: EXECUTION WITH RATE LIMIT HANDLING ---
     if "Gemini" in engine_choice:
         models_to_try = CLOUD_MODELS
     else:
@@ -380,38 +393,42 @@ def grade_with_direct_read(rubric_filename, student_essay, prompt_template, cont
             debug_log.append(f"❌ {model_name} failed: {str(e)[:100]}...")
             last_error = e
             
-            # --- INTELLIGENT BACKOFF ---
-            # If Google explicitly tells us how long to wait, we OBEY it.
+            # --- INTELLIGENT BACKOFF (CRITICAL FOR T&Q + MOD 2) ---
+            # If we hit the quota, we must wait it out.
             if "retry in" in error_msg:
                 try:
-                    # Regex to find the number (e.g., "27.701")
                     import re
                     match = re.search(r"retry in (\d+(\.\d+)?)", error_msg)
                     if match:
-                        wait_seconds = float(match.group(1))
-                        # Add 5 second buffer to be safe
-                        total_wait = wait_seconds + 5
-                        debug_log.append(f"⏳ Quota Hit. Google asked to wait {wait_seconds}s. Sleeping {total_wait:.1f}s...")
-                        time.sleep(total_wait)
-                        # After sleeping, we retry the SAME model or continue to next?
-                        # Continuing to next model is safer as it might be a model-specific quota
+                        wait_seconds = float(match.group(1)) + 5 # Add buffer
+                        wait_msg = f"⏳ Quota Limit Hit (T&Q + Mod 2 is large). Waiting {wait_seconds:.1f}s to clear API..."
+                        debug_log.append(wait_msg)
+                        st.toast(wait_msg, icon="🛑")
+                        time.sleep(wait_seconds)
+                        # Retry loop continues...
                         continue 
                 except:
                     pass
             
-            # Fallback for generic 429 without specific time
+            # Generic 429 catch-all
             if "429" in error_msg or "quota" in error_msg:
-                debug_log.append(f"⏳ Generic Rate Limit. Sleeping 30s...")
+                debug_log.append(f"⏳ Rate Limit. Sleeping 30s...")
                 time.sleep(30)
                 continue
             
+    # If we exit the loop, everything failed
     raise last_error if last_error else Exception("All models failed silently.")
 
 # --- 8. UI INITIALIZATION ---
 if "messages" not in st.session_state: st.session_state.messages = []
 if "rubric_query" not in st.session_state: st.session_state.rubric_query = ""
 if "last_evidence" not in st.session_state: st.session_state.last_evidence = []
+content_scope = st.multiselect("Include Content:", options=list(MODULE_FILE_MAP.keys()))
 
+# --- Add this check ---
+if "Module 2" in content_scope:
+     st.caption("ℹ️ **Note:** Module 2 + T&Q is a large dataset. Grading may pause for a couple minutes depending on to process.")
+# ----------------------
 # --- 9. SIDEBAR ---
 with st.sidebar:
     st.header("Control Panel")
