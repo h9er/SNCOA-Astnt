@@ -9,9 +9,9 @@ import time
 # --- 1. COMPATIBILITY FIX (CRITICAL FOR CLOUD) ---
 # This must be the very first thing that runs
 try:
-    __import__('pysqlite3')
+    import pysqlite3
     import sys
-    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+    sys.modules['sqlite3'] = pysqlite3
 except ImportError:
     pass
 # -------------------------------------------------
