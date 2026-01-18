@@ -262,10 +262,11 @@ MODULE_FILE_MAP = {
     "Module 4": ["Module4_Primer Strategic Focus Lab 01 Aug 2024.pdf"]
 }
 CLOUD_MODELS = [
-    "gemini-flash-latest",
+    "gemini-2.5-pro", 
+    "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
-    "gemini-3-flash",
-    "gemma-3-27b-it", 
+    "gemini-2.0-flash",
+    "gemini-flash-latest", 
     "gemini-pro"
 ]
 
@@ -275,7 +276,7 @@ def get_llm_instance(engine_choice, model_name=None):
     """Create LLM instance with proper error handling."""
     try:
         if "Gemini" in engine_choice:
-            target_model = model_name if model_name else "gemini-flash-latest"
+            target_model = model_name if model_name else "gemini-2.0-flash"
             
             # Verify API key exists
             if "GOOGLE_API_KEY" not in os.environ:
