@@ -902,7 +902,7 @@ with col_main:
         with c5: st.button("📋 Mod 4 - PoA", on_click=set_rubric, args=["Module 4 - Plan of Action Briefing 01 May 2024.pdf"])
         
         assignment_filename = st.text_input("Selected Rubric:", value=st.session_state.rubric_query, disabled=True)
-        content_scope = st.multiselect("Include Content:", options=list(MODULE_FILE_MAP.keys()))
+        #content_scope = st.multiselect("Include Content:", options=list(MODULE_FILE_MAP.keys()))
         student_essay = st.text_area("Paste Student Submission:", height=300)
         
         if st.button("Evaluate Submission", type="primary"):
